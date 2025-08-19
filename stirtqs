@@ -1,0 +1,86 @@
+Macro & Policy
+
+“When you look at current OIS pricing, do you think the market is too aggressive in cutting relative to the BoE’s communication?”
+
+“Which data releases move the front-end most reliably these days — is it still CPI and AWE, or have PMIs and services data gained more weight?”
+
+“How do you balance the BoE’s stated reaction function with market expectations of imported inflation via GBP weakness?”
+
+🛠️ Market Structure
+
+“How much do repo dynamics and collateral conditions bleed into how SONIA trades at the very front-end?”
+
+“Do you think SONIA futures are still the cleanest way to express a macro view, or have meeting-dated OIS swaps become more liquid for tactical trading?”
+
+“When the APF sells gilts and reserves shrink, how does that change your view on the stability of SONIA fixings?”
+
+📈 Curve & Relative Value
+
+“Do you see more opportunity in trading outright BoE meeting risk, or in relative value across the strip (e.g., reds vs greens)?”
+
+“How do you think about GBP front-end vs EUR — does the ECB’s faster easing bias create attractive relative trades in the belly?”
+
+“Are there situations where the SONIA strip is ‘over-hedged’ by real money, creating good risk-reward to fade consensus positioning?”
+
+🎲 Risk & Trading Process
+
+“When you’re running risk around CPI or MPC day, how do you size positions — is it more about optionality or running small outright delta?”
+
+“How do you avoid getting chopped up by intraday volatility in STIRT, where every tick can move on headlines?”
+
+“What role do options (swaptions, cap/floors) play in complementing your risk around the front-end?”
+
+✅ These questions show you understand:
+
+STIRT is data + BoE reaction function + micro plumbing (SONIA, repo, reserves).
+
+They think in terms of event risk + relative value + positioning.
+
+Would you like me to also prepare trader-style one-liners you can say before asking the question (e.g., “With CPI surprising to the downside but wages still sticky, it feels like the front-end is torn between stagflation and disinflation. How do you think about that when trading the SONIA strip?”)? Those framing lines make you sound like you’re already speaking their language.
+
+You said:
+these questions arent clever enough
+ChatGPT said:
+
+Got it — you’re right. A STIRT trader will find “what moves the front-end” too surface-level. You want to sound like you understand microstructure, relative value, and policy path convexity. Let’s sharpen them into properly clever, trader-style questions that would make you stand out.
+
+🧠 Clever, Nuanced Questions for a STIRT Trader
+🔄 Curve Dynamics & BoE Path
+
+“With the SONIA strip now pricing a shallow cutting cycle, how do you think about the convexity of meeting-dated pricing — i.e., whether the market is underestimating the tails of a faster/slower path?”
+→ Shows you know traders care about distribution, not just mean path.
+
+“Do you see more edge trading relative value across meetings — like May vs Aug MPC contracts — rather than the outright level of cuts?”
+→ Signals you understand event-spread trades are a STIRT bread-and-butter.
+
+📊 Cross-Market & Basis
+
+“How do you think about GBP/EUR front-end divergence trades, given the ECB is already easing faster — is the trade more about central bank divergence or about relative terminal rates?”
+→ Shows awareness of cross-market RV.
+
+“With SONIA firmly established, do you still see any dislocations between SONIA futures and OIS, or between SONIA and GC repo?”
+→ That’s plumbing-level clever — they’ll know you’ve thought about curve construction.
+
+🛠️ Technical Microstructure
+
+“When APF gilt sales drain reserves, SONIA stays anchored — but do you worry about fixings becoming more volatile as reserves fall, or is the new repo-based framework insulating you?”
+→ Links BoE balance sheet → SONIA microstructure.
+
+“How much weight do you give to collateral scarcity at quarter-ends or coupon dates when thinking about SONIA strips — can these technicals create tactical RV trades?”
+→ This is exactly the kind of STIRT-specific nuance they’ll appreciate.
+
+⚖️ Risk & Positioning
+
+“When you take risk into CPI or AWE releases, do you think about it more in terms of options-like convexity — e.g., getting paid for the tails — rather than just delta?”
+→ Clever because it hints you understand event convexity matters more than outright directional bets.
+
+“Do you notice systematic positioning in the strip — like real money consistently over-hedging the reds — and how do you decide when that positioning becomes a fade opportunity?”
+→ This is the kind of flow-aware cleverness traders like.
+
+🌍 Big Picture Integration
+
+“When the front-end reprices aggressively after US CPI or Fed minutes, how do you judge whether GBP is genuinely mis-aligned with BoE dynamics versus just a global beta move?”
+→ Shows you know GBP front-end is often dragged by global rates.
+
+“Do you see UK stagflation risk as creating asymmetric risk in the strip — i.e., limited room for cuts to be priced in, but much more room for them to be priced out?”
+→ Phrased in trader-language: asymmetry.
