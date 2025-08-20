@@ -1,0 +1,123 @@
+import numpy as np
+import pandas as pd
+
+# -----------------------------------
+# 0) CONFIG
+# -----------------------------------
+BASELINE_REL = 0           # use auction-day close as baseline; set -1 for "day-before"
+WINDOW = (-8, 8)           # keep T-8 ... T+8 around the auction
+IN_BP = True               # output concession in basis points
+BP_SCALE = 100.0           # if yields/swaps are in % -> 100 ; if in decimals -> 10000
+
+# -----------------------------------
+# 1) Map each series_id to a tenor (you already had this)
+# -----------------------------------
+series_meta = asw_df.drop_duplicates(["series_id","tenor_years"])[["series_id","tenor_years"]]
+
+# -----------------------------------
+# 2) Attach tenor to your gilt time series and add same-date swap rate via interpolation
+# -----------------------------------
+def attach_swap_rate(gilt_df, swap_df, series_meta):
+    """
+    For each (date, series_id), attach the swap rate at the bond's tenor (linear interp on that date's curve).
+    Expects:
+      gilt_df: ['series_id','date','yld']
+      series_meta: ['series_id','tenor_years']
+      swap_df: ['date','tenor_years','swap_rate']
+    """
+    g = (gilt_df
+         .merge(series_meta, on="series_id", how="left")
+         .dropna(subset=["tenor_years"])
+         .copy())
+
+    g["tenor_years"] = g["tenor_years"].astype(float)
+
+    swap_df = swap_df.copy()
+    swap_df["tenor_years"] = swap_df["tenor_years"].astype(float)
+    swap_df = swap_df.sort_values(["date","tenor_years"])
+
+    out = []
+    for d, gg in g.groupby("date", sort=False):
+        curve = swap_df.loc[swap_df["date"] == d, ["tenor_years","swap_rate"]]
+        if curve.empty:
+            continue
+
+        x = curve["tenor_years"].to_numpy()
+        y = curve["swap_rate"].to_numpy()
+        tgt = gg["tenor_years"].to_numpy()
+
+        tgt_clipped = np.clip(tgt, x.min(), x.max())
+        swap_at_tenor = np.interp(tgt_clipped, x, y)
+
+        tmp = gg.copy()
+        tmp["swap_rate"] = swap_at_tenor
+        out.append(tmp)
+
+    if not out:
+        return pd.DataFrame(columns=list(g.columns) + ["swap_rate"])
+
+    return pd.concat(out, ignore_index=True)
+
+# Build gilt+swap dataset
+gilt_ts = asw_df[["series_id","date","yld"]].copy()
+gilt_ts = attach_swap_rate(gilt_ts, swap_df, series_meta)
+
+# -----------------------------------
+# 3) Compute ASW time series (per bond, per date)
+# -----------------------------------
+gilt_ts["asw"] = gilt_ts["yld"] - gilt_ts["swap_rate"]
+
+# -----------------------------------
+# 4) Build relative-day panel around each auction (using your calendar)
+# -----------------------------------
+def pick_series(row):
+    cands = series_meta[series_meta["tenor_years"] == row["tenor_years"]]
+    return cands.iloc[0]["series_id"] if not cands.empty else None
+
+calendar_df["series_id"] = calendar_df.apply(pick_series, axis=1)
+cal_matched = calendar_df.dropna(subset=["series_id"])
+
+panel = []
+for _, a in cal_matched.iterrows():
+    g = gilt_ts[gilt_ts["series_id"] == a["series_id"]].copy()
+    g = g.sort_values("date")
+    dates = list(g["date"].unique())
+    if a["auction_dt"] not in dates:
+        continue
+    pos = dates.index(a["auction_dt"])
+    for k, d in enumerate(dates):
+        rel = k - pos
+        if WINDOW[0] <= rel <= WINDOW[1]:
+            asw_val = g.loc[g["date"] == d, "asw"].mean()
+            panel.append({
+                "auction_dt": a["auction_dt"],
+                "series_id": a["series_id"],
+                "date": d,
+                "rel_day": rel,
+                "asw": asw_val,
+                "bucket": a.get("bucket", None)
+            })
+
+panel = pd.DataFrame(panel)
+
+# -----------------------------------
+# 5) Compute ASW concession vs baseline
+# -----------------------------------
+def make_concession_panel(panel, metric="asw", baseline_rel=BASELINE_REL, window=WINDOW,
+                          in_bp=IN_BP, bp_scale=BP_SCALE):
+    p = panel[panel["rel_day"].between(window[0], window[1])].copy()
+
+    base = (p[p["rel_day"] == baseline_rel]
+            .groupby(["auction_dt","series_id"])[metric]
+            .mean()
+            .rename("baseline"))
+
+    p = p.merge(base, on=["auction_dt","series_id"], how="inner")
+    p["concession"] = p[metric] - p["baseline"]
+
+    if in_bp:
+        p["concession"] = p["concession"] * bp_scale
+
+    return p
+
+cons_panel = make_concession_panel(panel, metric="asw")  # <-- ASW concession in bp
