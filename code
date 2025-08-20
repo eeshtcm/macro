@@ -1,123 +1,128 @@
+import re
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
-# -----------------------------------
-# 0) CONFIG
-# -----------------------------------
-BASELINE_REL = 0           # use auction-day close as baseline; set -1 for "day-before"
-WINDOW = (-8, 8)           # keep T-8 ... T+8 around the auction
-IN_BP = True               # output concession in basis points
-BP_SCALE = 100.0           # if yields/swaps are in % -> 100 ; if in decimals -> 10000
+# ---------------- CONFIG ----------------
+BASELINE_REL = 0        # 0 = auction-day baseline; -1 = day-before
+WINDOW = (-8, 8)
+IN_BP = True
+BP_SCALE = 100.0        # your rates look like 0.32 (=0.32%), so 1pp = 100bp
 
-# -----------------------------------
-# 1) Map each series_id to a tenor (you already had this)
-# -----------------------------------
-series_meta = asw_df.drop_duplicates(["series_id","tenor_years"])[["series_id","tenor_years"]]
+# ---------- 1) Make sure gilt_df has tenor_years ----------
+def _parse_maturity_date_from_series(series: pd.Series) -> pd.Series:
+    pat = re.compile(r'(\d{2}-[A-Za-z]{3}-\d{4})')
+    return series.str.extract(pat, expand=False).pipe(pd.to_datetime, dayfirst=True, errors="coerce")
 
-# -----------------------------------
-# 2) Attach tenor to your gilt time series and add same-date swap rate via interpolation
-# -----------------------------------
-def attach_swap_rate(gilt_df, swap_df, series_meta):
-    """
-    For each (date, series_id), attach the swap rate at the bond's tenor (linear interp on that date's curve).
-    Expects:
-      gilt_df: ['series_id','date','yld']
-      series_meta: ['series_id','tenor_years']
-      swap_df: ['date','tenor_years','swap_rate']
-    """
-    g = (gilt_df
-         .merge(series_meta, on="series_id", how="left")
-         .dropna(subset=["tenor_years"])
-         .copy())
+def add_tenor_years(gilt_df: pd.DataFrame) -> pd.DataFrame:
+    g = gilt_df.copy()
+    g["date"] = pd.to_datetime(g["date"])
+    if "tenor_years" not in g.columns:
+        if "maturity_date" not in g.columns:
+            g["maturity_date"] = _parse_maturity_date_from_series(g["series_id"])
+            mfail = g["maturity_date"].isna() & g.get("maturity_year", pd.Series(index=g.index)).notna()
+            g.loc[mfail, "maturity_date"] = pd.to_datetime(
+                g.loc[mfail, "maturity_year"].astype(int).astype(str) + "-07-15"
+            )
+        g["tenor_years"] = (g["maturity_date"] - g["date"]).dt.days / 365.0
+    return g
 
+gilt_df = add_tenor_years(gilt_df)
+
+# ---------- 2) Prep SONIA swaps (rename yld->swap_rate) ----------
+swap_df = swap_df.copy()
+swap_df["date"] = pd.to_datetime(swap_df["date"])
+swap_df["tenor_years"] = swap_df["tenor_years"].astype(float)
+swap_df = swap_df.rename(columns={"yld":"swap_rate"}).sort_values(["date","tenor_years"])
+
+# (Optional sanity check)
+tenors_per_day = swap_df.groupby("date")["tenor_years"].nunique().median()
+assert tenors_per_day >= 5, "Your swap_df only has ~one tenor per day; pull more terms (1–30y)!"
+
+# ---------- 3) Attach swap rate at each gilt’s remaining maturity ----------
+def attach_swap_at_tenor(gilts: pd.DataFrame, swaps: pd.DataFrame) -> pd.DataFrame:
+    g = gilts[["series_id","date","tenor_years","yld"]].copy()
     g["tenor_years"] = g["tenor_years"].astype(float)
-
-    swap_df = swap_df.copy()
-    swap_df["tenor_years"] = swap_df["tenor_years"].astype(float)
-    swap_df = swap_df.sort_values(["date","tenor_years"])
-
     out = []
     for d, gg in g.groupby("date", sort=False):
-        curve = swap_df.loc[swap_df["date"] == d, ["tenor_years","swap_rate"]]
+        curve = swaps.loc[swaps["date"] == d, ["tenor_years","swap_rate"]]
         if curve.empty:
             continue
-
         x = curve["tenor_years"].to_numpy()
         y = curve["swap_rate"].to_numpy()
         tgt = gg["tenor_years"].to_numpy()
-
-        tgt_clipped = np.clip(tgt, x.min(), x.max())
-        swap_at_tenor = np.interp(tgt_clipped, x, y)
-
+        tgt_clip = np.clip(tgt, x.min(), x.max())      # safely handle off-curve
+        swap_at_tenor = np.interp(tgt_clip, x, y)      # linear interpolation
         tmp = gg.copy()
         tmp["swap_rate"] = swap_at_tenor
         out.append(tmp)
+    return pd.concat(out, ignore_index=True) if out else g.assign(swap_rate=np.nan)
 
-    if not out:
-        return pd.DataFrame(columns=list(g.columns) + ["swap_rate"])
+gilt_ts = attach_swap_at_tenor(gilt_df, swap_df)
+gilt_ts["asw"] = gilt_ts["yld"] - gilt_ts["swap_rate"]  # ASW in % points
 
-    return pd.concat(out, ignore_index=True)
+# ---------- 4) Build concession panel ----------
+def build_concession_panel(gilt_ts, calendar_df, window=WINDOW, baseline_rel=BASELINE_REL,
+                           in_bp=IN_BP, bp_scale=BP_SCALE):
+    cal = calendar_df.copy()
+    cal["auction_dt"] = pd.to_datetime(cal["auction_dt"])
 
-# Build gilt+swap dataset
-gilt_ts = asw_df[["series_id","date","yld"]].copy()
-gilt_ts = attach_swap_rate(gilt_ts, swap_df, series_meta)
-
-# -----------------------------------
-# 3) Compute ASW time series (per bond, per date)
-# -----------------------------------
-gilt_ts["asw"] = gilt_ts["yld"] - gilt_ts["swap_rate"]
-
-# -----------------------------------
-# 4) Build relative-day panel around each auction (using your calendar)
-# -----------------------------------
-def pick_series(row):
-    cands = series_meta[series_meta["tenor_years"] == row["tenor_years"]]
-    return cands.iloc[0]["series_id"] if not cands.empty else None
-
-calendar_df["series_id"] = calendar_df.apply(pick_series, axis=1)
-cal_matched = calendar_df.dropna(subset=["series_id"])
-
-panel = []
-for _, a in cal_matched.iterrows():
-    g = gilt_ts[gilt_ts["series_id"] == a["series_id"]].copy()
-    g = g.sort_values("date")
-    dates = list(g["date"].unique())
-    if a["auction_dt"] not in dates:
-        continue
-    pos = dates.index(a["auction_dt"])
-    for k, d in enumerate(dates):
-        rel = k - pos
-        if WINDOW[0] <= rel <= WINDOW[1]:
-            asw_val = g.loc[g["date"] == d, "asw"].mean()
-            panel.append({
-                "auction_dt": a["auction_dt"],
-                "series_id": a["series_id"],
-                "date": d,
-                "rel_day": rel,
-                "asw": asw_val,
-                "bucket": a.get("bucket", None)
-            })
-
-panel = pd.DataFrame(panel)
-
-# -----------------------------------
-# 5) Compute ASW concession vs baseline
-# -----------------------------------
-def make_concession_panel(panel, metric="asw", baseline_rel=BASELINE_REL, window=WINDOW,
-                          in_bp=IN_BP, bp_scale=BP_SCALE):
-    p = panel[panel["rel_day"].between(window[0], window[1])].copy()
+    rows = []
+    for _, a in cal.iterrows():
+        g = gilt_ts[gilt_ts["series_id"] == a["series_id"]].sort_values("date")
+        dates = list(g["date"].unique())
+        if a["auction_dt"] not in dates:
+            continue
+        pos = dates.index(a["auction_dt"])
+        for k, d in enumerate(dates):
+            rel = k - pos
+            if window[0] <= rel <= window[1]:
+                rows.append({
+                    "auction_dt": a["auction_dt"],
+                    "series_id": a["series_id"],
+                    "date": d,
+                    "rel_day": rel,
+                    "asw": g.loc[g["date"] == d, "asw"].mean(),
+                    "bucket": a.get("bucket", None)
+                })
+    p = pd.DataFrame(rows)
 
     base = (p[p["rel_day"] == baseline_rel]
-            .groupby(["auction_dt","series_id"])[metric]
+            .groupby(["auction_dt","series_id"])["asw"]
             .mean()
             .rename("baseline"))
-
     p = p.merge(base, on=["auction_dt","series_id"], how="inner")
-    p["concession"] = p[metric] - p["baseline"]
-
+    p["concession"] = p["asw"] - p["baseline"]
     if in_bp:
         p["concession"] = p["concession"] * bp_scale
-
     return p
 
-cons_panel = make_concession_panel(panel, metric="asw")  # <-- ASW concession in bp
+cons_panel = build_concession_panel(gilt_ts, calendar_df)
+
+# ---------- 5) Plot like your example ----------
+def plot_concession(cons_panel, buckets=("Long","Short")):
+    fig, axes = plt.subplots(len(buckets), 1, figsize=(9, 8), sharex=True)
+    if len(buckets) == 1: axes = [axes]
+    for ax, b in zip(axes, buckets):
+        q = cons_panel if b is None else cons_panel[cons_panel["bucket"] == b]
+        if q.empty:
+            ax.set_title(f"ASW concession = f(t) — {b} (no data)"); continue
+        grp = q.groupby("rel_day")["concession"]
+        stats = pd.DataFrame({
+            "mean": grp.mean(),
+            "q75": grp.quantile(0.75),
+            "q25": grp.quantile(0.25),
+        }).reset_index()
+        ax.plot(stats["rel_day"], stats["mean"], label="mean")
+        ax.plot(stats["rel_day"], stats["q75"], linestyle="--", label="0.75 quantile")
+        ax.plot(stats["rel_day"], stats["q25"], linestyle="--", label="0.25 quantile")
+        ax.axvline(0, linestyle="--", color="k", alpha=0.6)
+        ax.set_title(f"ASW concession = f(t) — {b}")
+        ax.set_ylabel("Concession (bp)")
+        ax.legend(loc="upper left")
+    axes[-1].set_xlabel("Trading days around auction (T=0)")
+    plt.tight_layout()
+    return fig
+
+plot_concession(cons_panel, buckets=("Long","Short"))
+plt.show()
