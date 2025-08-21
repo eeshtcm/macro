@@ -85,3 +85,19 @@ cons_long, wide = make_concession_panel(
     pre_days=(8,7,6,5,4,3,2,1),
     fwd_days=(1,2,3,4,5)
 )
+
+
+
+
+s = swap_df.loc[
+                (swap_df["date"] == d) &
+                (swap_df["tenor_years"] == a["tenor_years"]),
+                "yld"
+            ].mean()
+
+            # if no swap print, skip or set NaN (here we skip the row)
+            if pd.isna(s):
+                continue
+
+            spread = y_asw - s                      # in % points (or decimals)
+            spread_bp = spread * BP_SCALE if IN_BP else np.nan
