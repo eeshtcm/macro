@@ -1,0 +1,103 @@
+# ======= PREDICTIVE LAYER: regression + live forecast =======
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import LinearRegression, Ridge
+from sklearn.metrics import r2_score, mean_squared_error
+import matplotlib.pyplot as plt
+
+def fit_concession_regression(
+    wide_df: pd.DataFrame,
+    pre_cols: list,                 # e.g. ["P8","P7","P6"]
+    fwd_cols: list,                 # e.g. ["P4","P3"]  or ["T","F1","F2"]
+    model_type: str = "ridge",      # "linear" or "ridge"
+    ridge_alpha: float = 5.0
+):
+    """Fit a (multi‑output) regression Y=f(X) using chosen pre and forward columns."""
+    used = pre_cols + fwd_cols
+    sub = wide_df[used].dropna(how="any")
+    if sub.empty:
+        raise ValueError("No complete rows for the chosen columns. Relax horizons or baseline.")
+
+    X = sub[pre_cols].values
+    Y = sub[fwd_cols].values
+
+    if model_type.lower() == "ridge":
+        model = Ridge(alpha=ridge_alpha, fit_intercept=True)
+    else:
+        model = LinearRegression(fit_intercept=True)
+
+    model.fit(X, Y)
+
+    # in‑sample diagnostics (quick, robust check)
+    Y_hat = model.predict(X)
+    r2 = r2_score(Y, Y_hat, multioutput="raw_values")
+    rmse = np.sqrt(mean_squared_error(Y, Y_hat, multioutput="raw_values"))
+
+    meta = {"pre_cols": pre_cols, "fwd_cols": fwd_cols, "model_type": model_type, "ridge_alpha": ridge_alpha}
+    return model, dict(zip(fwd_cols, r2)), dict(zip(fwd_cols, rmse)), meta
+
+
+def forecast_forward_concession(model, meta: dict, pre_values: dict) -> pd.Series:
+    """
+    pre_values: dict with keys matching meta['pre_cols'] (units same as your wide table, e.g., bp).
+      Example: {"P8": -3.2, "P7": -2.1, "P6": -1.4}
+    Returns: pd.Series indexed by meta['fwd_cols'] with predicted concessions.
+    """
+    pre_cols = meta["pre_cols"]; fwd_cols = meta["fwd_cols"]
+    x = np.array([[pre_values.get(c, np.nan) for c in pre_cols]], dtype=float)
+    if np.isnan(x).any():
+        miss = [c for i, c in enumerate(pre_cols) if np.isnan(x[0, i])]
+        raise ValueError(f"Missing pre values for: {miss}")
+    yhat = model.predict(x)[0]
+    return pd.Series(yhat, index=fwd_cols, name="forecast")
+
+
+def latest_pre_vector(wide_df: pd.DataFrame, pre_cols: list, auction_dt=None, series_id=None) -> dict:
+    """
+    Pull a pre‑vector from 'wide_df' for a given auction/series, or just the last row if not specified.
+    """
+    w = wide_df.copy()
+    if auction_dt is not None:
+        w["auction_dt"] = pd.to_datetime(w["auction_dt"])
+        w = w[w["auction_dt"] == pd.to_datetime(auction_dt)]
+    if series_id is not None:
+        w = w[w["series_id"] == series_id]
+    if w.empty:
+        raise ValueError("No matching row in wide_df for the given auction/series filter.")
+    return w.iloc[-1][pre_cols].to_dict()
+
+
+def plot_regression_results(X_df: pd.DataFrame, Y_df: pd.DataFrame, Y_pred: np.ndarray, fwd_cols: list, title="Predicted vs Actual"):
+    """Quick scatter overlay for all target horizons."""
+    plt.figure(figsize=(9,5))
+    for i, col in enumerate(fwd_cols):
+        y_true = Y_df.iloc[:, i]
+        y_hat  = Y_pred[:, i]
+        plt.scatter(y_true, y_hat, alpha=0.7, label=col)
+        lo, hi = np.nanmin(y_true.append(pd.Series(y_hat))), np.nanmax(y_true.append(pd.Series(y_hat)))
+        plt.plot([lo, hi], [lo, hi], "k--", lw=1)
+    plt.xlabel("Actual"); plt.ylabel("Predicted"); plt.title(title); plt.legend(); plt.tight_layout(); plt.show()
+
+
+# ======= EXAMPLE USAGE (place right after you build `wide` from concessions_wide) =======
+# wide = concessions_wide(panel, metric="asw_minus_swap_bp" or "curve_conc_bp", baseline_rel=0)
+
+# choose which horizons to use
+pre_cols  = ["P8","P7","P6"]      # inputs
+fwd_cols  = ["P4","P3"]           # targets (could be ["T","F1","F2"] if you prefer)
+
+# fit model
+model, r2, rmse, meta = fit_concession_regression(wide, pre_cols, fwd_cols, model_type="ridge", ridge_alpha=5.0)
+print("R² by horizon:", {k: round(v,3) for k,v in r2.items()})
+print("RMSE by horizon:", {k: round(v,2) for k,v in rmse.items()})
+
+# (optional) in-sample scatter to eyeball fit quality
+_sub = wide[pre_cols + fwd_cols].dropna(how="any")
+Y_pred_in = model.predict(_sub[pre_cols].values)
+plot_regression_results(_sub[pre_cols], _sub[fwd_cols], Y_pred_in, fwd_cols, title="Concession regression – in-sample")
+
+# live forecast (either pull last row or pass your own dict)
+pre_now = latest_pre_vector(wide, pre_cols)  # or {"P8": -3.1, "P7": -2.4, "P6": -1.7}
+forecast = forecast_forward_concession(model, meta, pre_now)
+print("Live forecast (bp):")
+print(forecast.round(2))
