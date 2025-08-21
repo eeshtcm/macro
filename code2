@@ -99,5 +99,162 @@ s = swap_df.loc[
             if pd.isna(s):
                 continue
 
+
+
+
+# === Concession vs Curve Slope (steepening/flattening) ===
+# One cell: build slope, align to auctions, normalize to baseline, and plot.
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# ----------------------- CONFIG -----------------------
+# Which curve and legs?
+CURVE_DF = asw_df          # your par/zero curve. Must have: date, tenor_years, yld
+LEG1, LEG2 = 2.0, 10.0     # 2s10s; try (5.0, 30.0) for 5s30s
+USE_BP_FOR_SLOPE = True    # convert slope to bp (recommended)
+# Concession source
+PANEL_LONG = panel         # your long panel around auctions (one row per (auction,date))
+METRIC_COL = "concession"  # if PANEL_LONG already has 'concession' -> use it
+                           # else set to your metric col (e.g. "asw_minus_swap_bp" or "curve_conc_bp")
+BASELINE_REL = 0           # normalize both series to the baseline rel_day (e.g. T=0)
+WINDOW = (-8, 8)           # rel_day window to keep
+BUCKETS = None             # e.g. ("Long","Mid","Short") or None for "all-in-one"
+
+# ----------------------- HELPERS -----------------------
+def _ensure_datetime(s):
+    return pd.to_datetime(s, errors="coerce").dt.normalize()
+
+def make_concession_if_needed(p: pd.DataFrame, metric: str, baseline_rel: int, window=(-8,8)):
+    """
+    If 'concession' exists, just filter window and return.
+    Otherwise compute concession = metric - baseline(metric @ baseline_rel).
+    """
+    p = p.copy()
+    p["date"] = _ensure_datetime(p["date"])
+    p = p[p["rel_day"].between(window[0], window[1])]
+    if "concession" in p.columns:
+        return p
+    # compute baseline per auction
+    base = (p[p["rel_day"]==baseline_rel]
+            .groupby(["auction_dt","series_id"])[metric]
+            .mean().rename("baseline").reset_index())
+    p = p.merge(base, on=["auction_dt","series_id"], how="inner")
+    # concession in same units as metric (assume bp if metric is *_bp)
+    p["concession"] = p[metric] - p["baseline"]
+    return p
+
+def build_curve_slope(curve_df: pd.DataFrame, leg1: float, leg2: float, to_bp=True):
+    """
+    From a par/zero curve (date, tenor_years, yld) compute slope = y(leg2) - y(leg1).
+    Returns: DataFrame [date, slope]
+    """
+    c = curve_df.copy()
+    c["date"] = _ensure_datetime(c["date"])
+    c["tenor_years"] = pd.to_numeric(c["tenor_years"], errors="coerce")
+    # Keep only legs we need (exact matches first)
+    cs = c[c["tenor_years"].isin([leg1, leg2])][["date","tenor_years","yld"]]
+    # If legs are not exact in the data, fall back to per-day linear interpolation
+    if cs.groupby("tenor_years").size().nunique() == 0 or cs.empty:
+        # wide pivot of full curve then interpolate
+        grid = (c.dropna(subset=["tenor_years","yld"])
+                  .sort_values(["date","tenor_years"]))
+        out = []
+        for d, g in grid.groupby("date"):
+            x = g["tenor_years"].to_numpy()
+            y = g["yld"].to_numpy()
+            if len(x) < 2:
+                continue
+            y1 = np.interp(leg1, [x.min(), *x, x.max()], [y[0], *y, y[-1]])
+            y2 = np.interp(leg2, [x.min(), *x, x.max()], [y[0], *y, y[-1]])
+            out.append({"date": d, "slope": y2 - y1})
+        slope = pd.DataFrame(out)
+    else:
+        w = cs.pivot_table(index="date", columns="tenor_years", values="yld", aggfunc="mean")
+        w = w.dropna(subset=[leg1, leg2], how="any").reset_index()
+        slope = pd.DataFrame({"date": w["date"], "slope": w[leg2] - w[leg1]})
+    if to_bp:
+        slope["slope"] = slope["slope"] * 100.0
+    return slope.sort_values("date")
+
+def align_and_normalize_slope(cons_long: pd.DataFrame, slope_df: pd.DataFrame, baseline_rel: int):
+    """
+    Join slope to long concession panel on calendar date.
+    Then compute slope_diff = slope - slope_at_baseline per auction (so both series are baseline-relative).
+    """
+    x = cons_long.merge(slope_df, on="date", how="left")  # adds 'slope'
+    # baseline slope per auction
+    base_slope = (x[x["rel_day"]==baseline_rel]
+                  .groupby(["auction_dt","series_id"])["slope"]
+                  .mean().rename("slope_base").reset_index())
+    x = x.merge(base_slope, on=["auction_dt","series_id"], how="left")
+    x["slope_diff"] = x["slope"] - x["slope_base"]
+    return x
+
+def _agg_stats(df, value_col):
+    g = df.groupby("rel_day")[value_col]
+    return (pd.DataFrame({
+        "rel_day": g.mean().index,
+        "mean": g.mean().values,
+        "q75": g.quantile(0.75).values,
+        "q25": g.quantile(0.25).values
+    }))
+
+def plot_concession_vs_slope(df: pd.DataFrame, label="All"):
+    """
+    Top: concession (mean / 0.75 / 0.25).
+    Bottom: curve slope change (mean, baseline-relative).
+    """
+    fig, axes = plt.subplots(2, 1, figsize=(9, 7), sharex=True)
+
+    # Concession stats
+    cs = _agg_stats(df, "concession")
+    axes[0].plot(cs["rel_day"], cs["mean"], label="mean")
+    axes[0].plot(cs["rel_day"], cs["q75"], linestyle="--", label="0.75 quantile")
+    axes[0].plot(cs["rel_day"], cs["q25"], linestyle="--", label="0.25 quantile")
+    axes[0].axvline(0, linestyle="--", color="k", alpha=0.6)
+    axes[0].set_title(f"Outright concession = f(t) — {label}")
+    axes[0].set_ylabel("Concession (bp)")
+    axes[0].legend(loc="upper left")
+
+    # Slope (baseline-relative)
+    ss = _agg_stats(df, "slope_diff")
+    axes[1].plot(ss["rel_day"], ss["mean"])
+    axes[1].axvline(0, linestyle="--", color="k", alpha=0.6)
+    axes[1].set_title(f"Curve slope change = f(t) — {label}  ({LEG1:.0f}s{LEG2:.0f}s)")
+    axes[1].set_ylabel("Slope change (bp)")
+    axes[1].set_xlabel("Trading days around auction (T=0)")
+
+    plt.tight_layout()
+    return fig
+
+# ----------------------- RUN -----------------------
+# 1) Concession long (compute if needed)
+cons_long = make_concession_if_needed(PANEL_LONG, METRIC_COL, BASELINE_REL, window=WINDOW)
+
+# 2) Curve slope series
+slope_series = build_curve_slope(CURVE_DF, LEG1, LEG2, to_bp=USE_BP_FOR_SLOPE)
+
+# 3) Align slope with concession and baseline-normalize
+aligned = align_and_normalize_slope(cons_long, slope_series, baseline_rel=BASELINE_REL)
+
+# 4) Plot — per bucket if provided, else all-in-one
+if BUCKETS:
+    for b in BUCKETS:
+        dfb = aligned[aligned["bucket"] == b]
+        if dfb.empty:
+            continue
+        plot_concession_vs_slope(dfb, label=b)
+else:
+    plot_concession_vs_slope(aligned, label="All")
+plt.show()
+
+# (Optional) quick correlation between pre-auction slope change and concession
+pre = aligned[aligned["rel_day"].between(-5, -1)]
+corr = pre[["concession","slope_diff"]].corr().iloc[0,1]
+print(f"Correlation (pre-auction) between concession and slope change: {corr:.2f}")
+
+
             spread = y_asw - s                      # in % points (or decimals)
             spread_bp = spread * BP_SCALE if IN_BP else np.nan
