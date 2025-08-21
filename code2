@@ -1,0 +1,87 @@
+import numpy as np
+import pandas as pd
+
+def make_concession_panel(
+    panel: pd.DataFrame,
+    metric: str = "y_close",
+    baseline_rel: int = 0,
+    window: tuple = (-8, 8),
+    in_bp: bool = True,
+    return_wide: bool = False,
+    pre_days = (8,7,6,5,4,3,2,1),
+    fwd_days = (1,2,3,4,5),
+):
+    """
+    Compute concession = metric - baseline (per auction_dt, series_id), keep rows in `window`.
+    If return_wide=True, also return a wide pivot with columns P8..P1, T, F1.. (baseline-relative).
+
+    panel columns expected: ['auction_dt','series_id','rel_day', metric] (+ optional 'bucket')
+    """
+    # 1) filter window
+    p = panel.loc[panel["rel_day"].between(window[0], window[1])].copy()
+
+    # 2) baseline per (auction, series)
+    base = (p.loc[p["rel_day"] == baseline_rel]
+              .groupby(["auction_dt","series_id"])[metric]
+              .mean()
+              .rename("baseline")
+              .reset_index())
+
+    # 3) join and compute concession
+    p = p.merge(base, on=["auction_dt","series_id"], how="inner")
+    p["concession"] = p[metric] - p["baseline"]
+    if in_bp:
+        p["concession"] = p["concession"] * 100.0  # % → bp
+
+    # ---- return long only (your current behavior) ----
+    if not return_wide:
+        return p
+
+    # 4) build wide (baseline‑relative concessions by rel_day label)
+    def _lbl(rel):
+        if rel < 0: return f"P{abs(rel)}"
+        if rel == 0: return "T"
+        return f"F{rel}"
+
+    keep = {f"P{d}" for d in pre_days} | {"T"} | {f"F{d}" for d in fwd_days}
+    pw = p.copy()
+    pw["horizon"] = pw["rel_day"].map(_lbl)
+    pw = pw[pw["horizon"].isin(keep)]
+
+    wide = (pw.pivot_table(index=["auction_dt","series_id"],
+                           columns="horizon",
+                           values="concession",
+                           aggfunc="mean")
+              .reset_index())
+
+    # optional: bring bucket back if present
+    if "bucket" in panel.columns:
+        ids = panel.drop_duplicates(["auction_dt","series_id"])[["auction_dt","series_id","bucket"]]
+        wide = wide.merge(ids, on=["auction_dt","series_id"], how="left")
+
+    # order columns nicely (only those that exist)
+    col_order = (["auction_dt","series_id"]
+                 + [c for c in [f"P{d}" for d in pre_days] if c in wide.columns]
+                 + (["T"] if "T" in wide.columns else [])
+                 + [c for c in [f"F{d}" for d in fwd_days] if c in wide.columns]
+                 + (["bucket"] if "bucket" in wide.columns else []))
+    wide = wide[col_order]
+
+    # return both long and wide for convenience
+    return p, wide
+
+
+# LONG only (same as your old function)
+cons_long = make_concession_panel(panel, metric="curve_conc_bp", baseline_rel=0, window=(-8,8), in_bp=True)
+
+# LONG + WIDE (for fan/regression)
+cons_long, wide = make_concession_panel(
+    panel,
+    metric="asw_minus_swap_bp",    # or "curve_conc_bp", or "y_close"
+    baseline_rel=0,
+    window=(-8,8),
+    in_bp=True,
+    return_wide=True,
+    pre_days=(8,7,6,5,4,3,2,1),
+    fwd_days=(1,2,3,4,5)
+)
