@@ -1,0 +1,162 @@
+Awesome idea to link your auction‑concession findings to the “supply regime” and QE/QT backdrop. Here’s a clean, trader‑friendly timeline for the last ~5 fiscal years (with the numbers you’ll want when you explain moves in ASW/curve‑concession), plus how to use it in your analysis.
+
+What “supply regime” + QE/QT” means (quick defs)
+
+Supply regime = how much gilt duration the DMO put into the market and where on the curve (short/med/long/index‑linked), by method (auctions, syndications, tenders), and any revisions. Bigger or front‑loaded issuance → more concession risk around auctions/syndications in the targeted bucket.
+
+QE/QT = how much duration the BoE took out of (QE) or put back into (QT) private hands via the Asset Purchase Facility (APF). Active APF sales + non‑reinvestment of maturities raise net supply and can steepen/cheapens ASW/curve in the affected sectors.
+
+Year‑by‑year: the numbers that matter
+FY 2020/21 (COVID shock; maximal QE; record gilt supply)
+
+DMO plan: £485.5bn gilt sales (record). 
+GOV.UK
+
+QE: 19 Mar 2020 +£200bn (Bank Rate to 0.1%); 18 Jun 2020 +£100bn; 5 Nov 2020 +£150bn → total gilts target ~£875bn (APF ~£895bn including corporates). 
+Bank of England
++2
+Bank of England
++2
+
+Concession link: massive buying by APF offset supply; pre‑auction concession often modest vs issuance size because QE was absorbing duration.
+
+FY 2021/22 (supply still heavy, QE winds down)
+
+DMO plan: initially £295.9bn, revised during the year (ultimately lowered; Oct‑21 revision steered to £194.8bn). 
+Department for Media and Offshore
++1
+
+QE: net purchases tapered; net purchases ceased March 2022. 
+Department for Media and Offshore
+
+Concession link: less BoE absorption; watch medium/long auctions for bigger pre‑auction concession relative to 2020/21.
+
+FY 2022/23 (start of QT; LDI episode)
+
+DMO plan: £124.7bn initially → £193.9bn after the Sept 2022 “Growth Plan” revision → £169.5bn after the Nov 2022 Autumn Statement. 
+Department for Media and Offshore
+Department for Media and Offshore
++1
+
+QT: Feb 2022 the MPC stopped reinvesting and set up corporate‑bond sales; gilt active sales scheduled for Q4‑2022 (later delayed during turmoil). 
+GOV.UK
+Bank of England
+
+LDI crisis: 28 Sep–14 Oct 2022 temporary gilt purchases (incl. linkers 11–14 Oct), ~£19.3bn total, to restore market functioning; then unwound. 
+Federal Reserve Bank of Chicago
+Bank of England
++1
+
+Concession link: regime was chaotic—revisions pushed more issuance, while QT lifted net supply; LDI stress forced BoE temporary buying that briefly reduced concession/cheapness in the affected tenors.
+
+FY 2023/24 (regular QT; still‑high issuance)
+
+DMO plan: £241.1bn at Budget → £237.8bn (Apr outturn tweak) → £237.3bn (Nov revision). 
+Department for Media and Offshore
++1
+
+QT: MPC set reduction of ~£100bn over Oct‑2023 to Sep‑2024 (mix of maturities rolling off + sales). By 31 Jan 2024 the APF gilt stock (at purchase price) was down to ~£738bn from £875bn at the start of QT; corporate bond portfolio essentially gone. 
+PublicNow
+Parliament Publications
+Reuters
+
+Concession link: with no QE bid and steady QT, net private‑sector supply rose—supportive of pre‑auction cheapening (especially in buckets the DMO emphasized).
+
+FY 2024/25 (largest net supply to private hands since records, because QT + bigger remit)
+
+DMO plan: £265.3bn at Budget → £277.7bn (Apr) → £296.9bn (Oct revision). 
+Department for Media and Offshore
++1
+
+Mix shifts: long share set to the lowest for years as DMO leaned more to short/medium (reflecting demand/pension fund dynamics). 
+Reuters
+
+Green‑gilt programme continued (total raised since 2021 noted in DMR). 
+Department for Media and Offshore
+
+QT: MPC extended another £100bn reduction over Oct‑2024 to Sep‑2025; only ~£13bn of that via active sales, the rest from maturities. 
+Reuters
+Bank of England
+
+Concession link: this is the textbook “heavy net supply” year—issuance near‑record + QT → expect larger and more persistent concessions, strongest in the buckets DMO was issuing most (short/med), unless risk appetite or LDI‑type technicals dominate.
+
+How to use this in your analytics (practical checklist)
+
+Build a daily “net duration supply” series
+For each business day, approximate:
+
+Net_supply = DMO_auctions_duration
+            + DMO_syndications_duration
+            + BoE_QT_sales_duration
+            + BoE_maturity_non‑reinvestment_duration
+            – BoE_QE_purchases_duration (if any)
+
+
+Use the remit calendars and APF schedules to tag dates. Revisions (Sep‑22, Nov‑22, Apr‑/Oct‑24) are structural breaks to include as dummies. 
+Department for Media and Offshore
++5
+Department for Media and Offshore
++5
+Department for Media and Offshore
++5
+
+Map issuance to curve buckets
+Short/med/long/index‑linked split each year drives where concession should show up (your “Long / Mid / Short” charts). The 2024/25 mix (more short/med) should bias concession there. 
+Department for Media and Offshore
+
+Overlay with your concession panel
+
+For each auction, compute pre‑T(‑k) concession and see if it covaries with cumulative scheduled issuance over the same window and with QT flow into that window.
+
+A simple regression you can run per bucket:
+
+Concession_i,t  ~  α
+                + β1 * Cum_issuance_in_bucket_(t-k..t-1)
+                + β2 * QT_flow_(t-k..t-1)
+                + β3 * “revision” dummies
+                + β4 * curve_controls (2s10s, 10s30s)
+                + ε
+
+
+Sign of β1, β2 should be positive if “more net supply ⇒ cheaper (more concession)” matches your plots.
+
+Extra context you can cite in your write‑up
+
+APF/QE timeline 2020 (200bn in Mar → 100bn in Jun → 150bn in Nov to £875bn gilts). 
+Bank of England
++2
+Bank of England
++2
+
+Start of QT / end of reinvestments: Feb 2022. 
+GOV.UK
+
+LDI intervention: 28 Sep–14 Oct 2022 (incl. 11–14 Oct linkers), £19.3bn total purchases, later unwound. 
+Federal Reserve Bank of Chicago
+Bank of England
+
+APF stock on the way down: by Jan 2024 ~£738bn (from £875bn); corporate bonds fully sold by Jun 2023. 
+Parliament Publications
+Reuters
+
+Issuance scale & revisions: 2020/21 £485.5bn; 2021/22 initially £295.9bn (later reduced), 2022/23 £124.7bn → £193.9bn → £169.5bn; 2023/24 £241.1bn → £237.3bn; 2024/25 £265.3bn → £296.9bn. 
+GOV.UK
+Department for Media and Offshore
++7
+Department for Media and Offshore
++7
+Department for Media and Offshore
++7
+Department for Media and Offshore
+
+How to “link to your results”
+
+When you present your concession plots:
+
+Add a bottom panel with the weekly net‑supply bars (DMO issuance ± APF sales/maturities).
+
+Annotate remit revisions and LDI window with vertical bands.
+
+For each auction point, print a tiny label with the same‑bucket issuance in the prior week and the sign/magnitude of QT flow.
+
+That makes it obvious when your concession f(t) lines are reacting to “more paper coming” (or “no BoE bid”).
