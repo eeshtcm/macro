@@ -152,3 +152,28 @@ def plot_concession(cons_panel, buckets=("Long","Short")):
 # Example:
 # plot_concession(cons_panel, buckets=("Long","Short"))
 # plt.show()
+
+
+
+
+
+# get unique series/tenors from asw_df
+series_meta = asw_df.drop_duplicates(["series_id", "tenor_years"])
+
+def pick_series(row):
+    cands = series_meta[series_meta["tenor_years"] == row["tenor_years"]]
+    return cands.iloc[0]["series_id"] if not cands.empty else None
+
+# assign series_id from asw_df
+calendar_df["series_id"] = calendar_df.apply(pick_series, axis=1)
+
+# bring tenor_years from swap_df into calendar_df
+calendar_df = calendar_df.merge(
+    swap_df[["tenor_years"]].drop_duplicates(),  # unique tenors from swap_df
+    how="left",
+    left_on="tenor_years", 
+    right_on="tenor_years"
+)
+
+# drop rows without series_id
+cal_matched = calendar_df.dropna(subset=["series_id", "tenor_years"])
